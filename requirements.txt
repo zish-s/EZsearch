@@ -1,0 +1,7 @@
+requests
+numpy
+pillow
+pyperclip
+pynput
+fastembed
+pywin32; sys_platform == "win32"
