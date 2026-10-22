@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ezsearch"
+version = "1.0.0"
+description = "Select a sentence, press a hotkey, click a picture - it lands in your document."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Ishita Sharmaa" }]
+keywords = ["clipboard", "clip", "images", "ollama", "local-ai", "desktop"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+    "requests>=2.31",
+    "numpy>=1.24",
+    "pillow>=10.0",
+    "pyperclip>=1.8",
+    "pynput>=1.7",
+    "fastembed>=0.4",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.urls]
+Homepage = "https://github.com/zish-s/EZsearch"
+Repository = "https://github.com/zish-s/EZsearch"
+
+[project.scripts]
+ezsearch = "ezsearch:main"
+
+[tool.setuptools]
+py-modules = ["ezsearch", "ezsearch_core", "ezsearch_focus", "ezsearch_ui"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
