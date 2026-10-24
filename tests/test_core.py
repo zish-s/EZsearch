@@ -23,6 +23,47 @@ def test_fallback_query_drops_stopwords():
     assert len(query.split()) <= 6
 
 
+def test_query_variants_rewrites_before_shortening():
+    """"roundabout in chandigarh" must try "roundabout chandigarh" first -
+    the ANDed "in" is what turned a rich topic into a one-hit pool."""
+    variants = core.query_variants("roundabout in chandigarh")
+    assert variants[0] == "roundabout in chandigarh"
+    assert "roundabout chandigarh" in variants
+    assert len(variants) == len(set(variants))     # no repeated phrasing
+
+
+def test_resolve_query_ignores_a_one_hit_pool(monkeypatch):
+    calls = []
+
+    def fake_search_all(variant, n, allow):
+        calls.append(variant)
+        if variant == "roundabout in chandigarh":
+            return ["the one Commons hit"]
+        if variant == "roundabout chandigarh":
+            return [f"pool{i}" for i in range(8)]
+        return []
+
+    monkeypatch.setattr(core, "_search_all", fake_search_all)
+    variant, cands = core.resolve_query("roundabout in chandigarh")
+    assert variant == "roundabout chandigarh"
+    assert len(cands) == 8
+    assert "roundabout chandigarh" in calls
+
+
+def test_resolve_query_falls_back_to_the_biggest_pool(monkeypatch):
+    def fake_search_all(variant, n, allow):
+        if variant == "roundabout in chandigarh":
+            return ["the one Commons hit"]
+        if variant == "roundabout":
+            return [f"pool{i}" for i in range(3)]     # small, but the biggest
+        return []
+
+    monkeypatch.setattr(core, "_search_all", fake_search_all)
+    variant, cands = core.resolve_query("roundabout in chandigarh")
+    assert variant == "roundabout"
+    assert len(cands) == 3
+
+
 def test_fallback_query_never_returns_empty():
     assert core.fallback_query("!!!") != ""
     assert core.fallback_query("") == ""

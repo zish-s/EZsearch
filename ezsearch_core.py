@@ -191,20 +191,28 @@ def ollama_available(model: str = LLM_MODEL) -> bool:
 
 
 def query_variants(query: str) -> list[str]:
-    """Progressively shorter versions of a query.
+    """Progressively less noisy phrasings of one query.
 
-    MediaWiki's search ANDs every term together, so a chatty query like
-    "lighthouse stood against violent storm" matches nothing at all - "stood"
-    and "against" are not words that appear in file names. Shortening the
-    query until the sources actually answer is far more robust than trusting
-    one phrasing.
+    MediaWiki's search ANDs every term together, so both kinds of failure
+    happen: a chatty sentence is too narrow ("roundabout in chandigarh"
+    matches one single Commons file, because "in" is part of the AND), and a
+    bloated query matches nothing. We send the original, then the same words
+    without filler, then progressively shorter prefixes - resolve_query picks
+    whichever phrasing answers with a pool worth choosing from.
     """
     words = query.split()
     variants = [query]
+    cleaned = " ".join(w for w in words if w.lower() not in STOPWORDS)
+    if cleaned and cleaned != query:
+        variants.append(cleaned)
     for size in (3, 2, 1):
         if len(words) > size:
             variants.append(" ".join(words[:size]))
-    return variants
+    ordered = []
+    for v in variants:
+        if v and v not in ordered:
+            ordered.append(v)
+    return ordered
 
 
 def warm_up(model: str = LLM_MODEL) -> None:
@@ -440,7 +448,10 @@ def search_openverse(query: str, n: int) -> list[dict]:
             results = r.json().get("results", [])
     except Exception:
         # Do not make every search pay the timeout: skip Openverse for a while.
-        _openverse_cooldown["until"] = time.time() + 600
+        # Short lockout: an anonymous Openverse failure once trapped the app in
+        # a ten-minute Commons-only grid, which looked like "the app is broken"
+        # to the user sitting in front of it. A minute cools a hiccup down.
+        _openverse_cooldown["until"] = time.time() + 60
         raise
     out = []
     for it in results:
@@ -551,18 +562,29 @@ def _search_all(query: str, n: int, allow_any_licence: bool) -> list[dict]:
     return _dedupe(merged)
 
 
+MIN_POOL = 6
+"""A pool below this is not a choice, only a verdict: keep rewriting the query."""
+
+
 def resolve_query(query: str, n: int = N_CANDIDATES,
                   allow_any_licence: bool = False) -> tuple[str, list[dict]]:
-    """Search, shortening the query until the sources actually answer.
+    """Search, rewriting the query until the answers are worth choosing from.
 
-    Returns the query that worked and the candidates it found.
+    "roundabout in chandigarh" returns exactly one Commons file ( MediaWiki
+    ANDs every word ), while the same words minus "in" return plenty. Each
+    variant needs at least MIN_POOL candidates to be accepted as *the* pool;
+    if no phrasing reaches that, the biggest pool we saw wins - a narrow
+    answer still beats none.
     """
-    variants = query_variants(query)
-    for i, variant in enumerate(variants):
+    best: list[dict] = []
+    best_variant = query
+    for i, variant in enumerate(query_variants(query)):
         candidates = _search_all(variant, n if i == 0 else min(n, 20), allow_any_licence)
-        if candidates:
+        if len(candidates) > len(best):
+            best, best_variant = candidates, variant
+        if len(candidates) >= MIN_POOL:
             return variant, candidates
-    return query, []
+    return best_variant, best
 
 
 def search_images(query: str, n: int = N_CANDIDATES, allow_any_licence: bool = False) -> list[dict]:
