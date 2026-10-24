@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import re
 import shutil
@@ -36,6 +37,10 @@ import time
 from pathlib import Path
 
 import ezsearch_core as core
+
+# The published report uses a Commons-only pool so both models see exactly the
+# same candidates. Set EZSEARCH_OPENVERSE=1 to benchmark the merged sources.
+os.environ.setdefault("EZSEARCH_OPENVERSE", "0")
 
 # A small test set of ordinary sentences, each with the words a good picture
 # of it would have in its title.

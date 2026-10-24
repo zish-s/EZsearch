@@ -115,11 +115,14 @@ Everything is an environment variable - no code edits needed.
 | `EZSEARCH_CACHE` | `~/.ezsearch` | Where downloaded images and vectors are cached |
 | `EZSEARCH_PREVIEW_WIDTH` | `320` | Width of the grid previews |
 | `EZSEARCH_FULL_WIDTH` | `1600` | Width of the picture that gets pasted |
+| `EZSEARCH_OPENVERSE` | `1` | Set to `0` to search Wikimedia Commons only |
 | `EZSEARCH_OPENVERSE_PHOTOS` | `1` | Prefer photographs over illustrations on Openverse |
-| `OPENVERSE_CLIENT_ID` / `OPENVERSE_CLIENT_SECRET` | unset | A free Openverse key unlocks a much bigger catalogue (Flickr and friends) |
+| `OPENVERSE_CLIENT_ID` / `OPENVERSE_CLIENT_SECRET` | unset | Optional: a free key raises Openverse's anonymous rate limit |
 | `OLLAMA_URL` | `http://localhost:11434/api/generate` | Point at a different Ollama |
 
-Without an Openverse key, EZsearch still works - it just searches Wikimedia Commons only.
+Openverse works without a key on its anonymous quota (about 200 requests a day at the time of
+writing); a free key raises the limit. If Openverse is slow or unreachable, EZsearch skips it for ten
+minutes and keeps using Commons.
 
 ---
 
@@ -182,7 +185,9 @@ vectors are also cached on disk, so the second time you search for the same thin
 
 Measured on this machine by `python benchmark.py` - see
 [`benchmark_results.md`](benchmark_results.md) for the full report. Windows 11, i5-13420H,
-CPU only, Python 3.12.
+CPU only, Python 3.12. The numbers below use a Commons-only candidate pool (Openverse was not
+configured for the benchmark run) so both models see exactly the same pool; the app queries both
+sources by default.
 
 ### Latency
 
@@ -251,7 +256,7 @@ the whole point of showing you where each one came from.
 pip install -r requirements.txt
 pip install pytest
 
-python -m pytest                 # 53 offline tests, no network, no models
+python -m pytest                 # 54 offline tests, no network, no models
 python benchmark.py              # latency + "does CLIP actually help" + model comparison
 python ezsearch.py --doctor      # check that everything is in place
 python ezsearch.py --search "a sentence"    # run the pipeline headless

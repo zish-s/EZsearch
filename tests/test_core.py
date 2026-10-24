@@ -271,6 +271,25 @@ def test_search_images_merges_both_sources(monkeypatch):
     assert sources[0] != sources[1]
 
 
+def test_openverse_anonymous_requests_stay_under_the_page_limit(monkeypatch):
+    """Openverse rejects page_size > 20 for anonymous callers with a 401."""
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs)
+        return _FakeResponse({"results": []})
+
+    monkeypatch.setattr(core, "_openverse_token", lambda: None)
+    monkeypatch.setattr(core.requests, "get", fake_get)
+    monkeypatch.setattr(core, "_openverse_cooldown", {"until": 0.0})
+
+    core.search_openverse("lighthouse", 24)
+
+    assert calls, "Openverse should be queried even without a key"
+    assert calls[0]["params"]["page_size"] == 20
+    assert "Authorization" not in calls[0]["headers"]
+
+
 def test_search_images_survives_a_dead_source(monkeypatch):
     def boom(query, n):
         raise RuntimeError("openverse is down")

@@ -41,6 +41,9 @@ That is the whole product. The interesting part is what it took to make the last
 | **CLIP ViT-B/32** via fastembed (ONNX) | Scores each candidate against the *whole sentence* | MIT |
 | **Wikimedia Commons + Openverse** | Supply the pictures | CC / public domain, per file |
 
+Both sources answer without an API key. Openverse's anonymous quota is small (about 200 requests a
+day at the time of writing); a free key raises it.
+
 The pipeline is deliberately boring:
 
 ```
@@ -149,6 +152,10 @@ perfect for a sentence without its file name saying so, and that is exactly the 
 for. But the paraphrased half of the set was built to test that case, and CLIP did not win there
 either. A tie is not a win, so I am not going to claim one.
 
+The numbers above use a Commons-only pool (Openverse was not configured for that run), so the two
+rows are directly comparable. The app queries both sources by default; a bigger pool does not change
+the finding, which is about the order, not the number of candidates.
+
 What I changed: CLIP still scores every tile - the match bar and the "no strong match" warning are
 built on that score - but it no longer reorders the grid. The app shows the search engine's order,
 which measured better. `EZSEARCH_RERANK=1` puts the experiment back.
@@ -162,7 +169,7 @@ already written; the benchmark is what stopped it from making the product worse.
 
 **1. The paste went nowhere in Word.** The whole product promise is "click, and it lands in your
 document". My first version called `SetForegroundWindow` and then sent a synthesised `Ctrl+V`.
-That works in Notepad and silently does nothing in Word, Outlook and VS Code.
+That works in a plain one-window app and silently does nothing in Word, Outlook and VS Code.
 
 The reason is that Office puts the caret in a *child* control. `SetForegroundWindow` activates the
 top-level frame, but keyboard focus stays on the frame's own window procedure, so the key press is
@@ -251,7 +258,7 @@ First run downloads the CLIP weights (~600 MB, cached afterwards). After that it
 and ranks entirely offline.
 
 ```bash
-python -m pytest        # 53 offline tests
+python -m pytest        # 54 offline tests
 python ezsearch.py --doctor
 python ezsearch.py --search "a sentence"   # headless
 ```

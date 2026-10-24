@@ -352,6 +352,7 @@ def search_commons(query: str, n: int) -> list[dict]:
 
 
 _token = {"value": None, "expires": 0.0}
+_openverse_cooldown = {"until": 0.0}
 
 
 def _openverse_token():
@@ -360,43 +361,68 @@ def _openverse_token():
         return None
     if _token["value"] and time.time() < _token["expires"]:
         return _token["value"]
-    r = requests.post(
-        "https://api.openverse.org/v1/auth_tokens/token/",
-        data={"grant_type": "client_credentials", "client_id": cid, "client_secret": secret},
-        headers={"User-Agent": UA}, timeout=10,
-    )
-    r.raise_for_status()
-    data = r.json()
+    try:
+        r = requests.post(
+            "https://api.openverse.org/v1/auth_tokens/token/",
+            data={"grant_type": "client_credentials", "client_id": cid, "client_secret": secret},
+            headers={"User-Agent": UA}, timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except Exception:
+        # A bad or expired key should not take the source down - fall back to
+        # the anonymous quota instead.
+        return None
     _token["value"] = data["access_token"]
     _token["expires"] = time.time() + int(data.get("expires_in", 3600)) - 60
     return _token["value"]
 
 
 def search_openverse(query: str, n: int) -> list[dict]:
-    """Openverse: bigger catalogue (Flickr etc.). Needs a free key for useful rate limits."""
+    """Openverse: bigger catalogue (Flickr etc.).
+
+    Openverse allows anonymous requests (about 200 a day at the time of
+    writing); a free client key raises the limit. If a key is configured we
+    use it, otherwise we ask anonymously.
+    """
+    if os.getenv("EZSEARCH_OPENVERSE", "1") == "0":
+        raise RuntimeError("Openverse disabled by EZSEARCH_OPENVERSE=0")
+    if time.time() < _openverse_cooldown["until"]:
+        raise RuntimeError("Openverse is cooling down after a failure")
+
     token = _openverse_token()
-    if not token:
-        raise RuntimeError("no Openverse key set")
+    headers = {"User-Agent": UA}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    # Anonymous callers are capped at 20 results per page; authenticated ones
+    # can ask for more. Asking for 24 anonymously is a 401, not an empty page.
+    page_size = min(n, 500 if token else 20)
+
     params = {"q": query, "mature": "false", "license_type": "commercial"}
     if os.getenv("EZSEARCH_OPENVERSE_PHOTOS", "1") == "1":
         params["category"] = "photograph"
-    r = requests.get(
-        "https://api.openverse.org/v1/images/",
-        params={**params, "page_size": n},
-        headers={"User-Agent": UA, "Authorization": f"Bearer {token}"}, timeout=15,
-    )
-    r.raise_for_status()
-    results = r.json().get("results", [])
-    if not results and "category" in params:
-        # The photograph filter was too narrow for this query - try again wider.
-        params.pop("category")
+    try:
         r = requests.get(
             "https://api.openverse.org/v1/images/",
-            params={**params, "page_size": n},
-            headers={"User-Agent": UA, "Authorization": f"Bearer {token}"}, timeout=15,
+            params={**params, "page_size": page_size},
+            headers=headers, timeout=6,
         )
         r.raise_for_status()
         results = r.json().get("results", [])
+        if not results and "category" in params:
+            # The photograph filter was too narrow for this query - try again wider.
+            params.pop("category")
+            r = requests.get(
+                "https://api.openverse.org/v1/images/",
+                params={**params, "page_size": page_size},
+                headers=headers, timeout=6,
+            )
+            r.raise_for_status()
+            results = r.json().get("results", [])
+    except Exception:
+        # Do not make every search pay the timeout: skip Openverse for a while.
+        _openverse_cooldown["until"] = time.time() + 600
+        raise
     out = []
     for it in results:
         licence = f'{it.get("license", "").upper()} {it.get("license_version", "")}'.strip()
@@ -435,8 +461,8 @@ def _search_all(query: str, n: int, allow_any_licence: bool) -> list[dict]:
     """Ask every configured source at once and merge the answers.
 
     Commons needs no key and always answers; Openverse adds Flickr and friends
-    but needs a key. When both are available we interleave them so that one
-    source cannot crowd the other out of the grid.
+    and also works anonymously, on a small daily quota. When both answer we
+    interleave them so that one source cannot crowd the other out of the grid.
     """
     def commons():
         try:

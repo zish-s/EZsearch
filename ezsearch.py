@@ -200,7 +200,14 @@ def doctor() -> int:
     elif ranker.error:
         print(f"CLIP ranker      : failed to load -> {ranker.error}")
     else:
-        print("CLIP ranker      : still loading the weights (first run downloads ~600 MB)")
+        ranker.wait_ready(30.0)
+        if ranker.ready:
+            print("CLIP ranker      : loaded")
+        elif ranker.error:
+            print(f"CLIP ranker      : failed to load -> {ranker.error}")
+        else:
+            print("CLIP ranker      : still loading (normal on a cold start - "
+                  "the first search waits for it)")
 
     print()
     try:
@@ -221,8 +228,12 @@ def doctor() -> int:
         print(f"clipboard        : no -> {e}")
 
     print()
-    print("Openverse key    : " + ("set" if os.getenv("OPENVERSE_CLIENT_ID") else "not set "
-                                  "(Commons still works, Openverse is skipped)"))
+    if os.getenv("EZSEARCH_OPENVERSE", "1") == "0":
+        print("Openverse        : disabled (EZSEARCH_OPENVERSE=0)")
+    elif os.getenv("OPENVERSE_CLIENT_ID") and os.getenv("OPENVERSE_CLIENT_SECRET"):
+        print("Openverse        : enabled (key set)")
+    else:
+        print("Openverse        : enabled (anonymous quota; a free key raises the limit)")
     return 0
 
 
