@@ -71,6 +71,12 @@ def selection_from_word() -> str:
         text = word.ActiveWindow.Selection.Text or ""
         text = str(text).replace("\r", " ").replace("\x07", " ").strip()
         if text:
+            # wdCollapseEnd: park the caret after the sentence so that a paste
+            # inserts the picture next to it instead of eating the text.
+            try:
+                word.ActiveWindow.Selection.Collapse(0)
+            except Exception:
+                pass
             sample = " ".join(text.split()[:6])
             print(f"EZsearch: Word COM fallback returned the selection: {sample!r}...")
         return text
@@ -88,6 +94,15 @@ def _window_title(hwnd: int) -> str:
     buf = ctypes.create_unicode_buffer(256)
     ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
     return buf.value
+
+
+def collapse_selection_end() -> None:
+    """Park the caret just past the active selection (a Right press does it),
+    so a later paste appends the picture instead of replacing the sentence."""
+    try:
+        kb.tap(keyboard.Key.right)
+    except Exception:
+        pass
 
 
 def grab_selection() -> str:
@@ -109,6 +124,7 @@ def grab_selection() -> str:
         time.sleep(0.05)
         text = pyperclip.paste()
         if text != sentinel:
+            collapse_selection_end()    # keep the sentence: paste after it
             return text.strip()
     pyperclip.copy(previous)            # nothing was selected: put the clipboard back
     if fallback := selection_from_word():
@@ -167,7 +183,9 @@ def run_pipeline() -> None:
                       else "CLIP still loading - showing unranked results"))
         # Download and embed in one pass: each picture is embedded the moment it
         # lands, instead of waiting for the whole grid to download first.
-        cands = core.rank_candidates(ranker, sentence, used_query, cands, limit=core.N_SHOWN)
+        # Hand the popup the whole ranked pool: it pages ("show more") instead
+        # of only ever seeing the first slice.
+        cands = core.rank_candidates(ranker, sentence, used_query, cands)
         if not cands:
             ui_queue.put(("status", f"No pictures could be loaded for: {used_query}"))
             return

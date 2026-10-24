@@ -83,7 +83,7 @@ class Popup:
         tk.Label(
             w,
             text="Click: paste   Ctrl+click: open source   Right-click: copy credit   "
-                 "Arrows+Enter: pick   Esc: close",
+                 "Arrows+Enter: pick   m: show more   Esc: close",
             bg=BG, fg=MUTED, font=("Segoe UI", 8)).pack(pady=(4, 8))
 
         w.update_idletasks()
@@ -98,9 +98,22 @@ class Popup:
             self.status_label.config(text="\U0001F9A5 " + text)
 
     # -- results ------------------------------------------------------------
+    PAGE = 8
+
     def show_results(self, query: str, cands: list[dict]):
-        if self.win is None:
-            return
+        """Show the first page; "show more" reveals the rest of the pool."""
+        self.query = query
+        self.all_results = cands
+        self.showing = min(self.PAGE, len(cands))
+        self._render()
+
+    def show_more(self):
+        self.showing = min(self.showing + self.PAGE, len(self.all_results))
+        self._render()
+        return "break"
+
+    def _render(self):
+        cands = self.all_results[:self.showing]
         self.candidates = cands
         self.selected = 0
         for child in self.grid_frame.winfo_children():
@@ -131,15 +144,24 @@ class Popup:
                 widget.bind("<Button-3>", lambda e, c=c: self.copy_credit_for(c))
                 widget.bind("<Enter>", lambda e, i=i: self.set_selected(i))
 
+        if len(self.all_results) > self.showing:
+            remaining = len(self.all_results) - self.showing
+            tk.Button(self.grid_frame, text=f"+ show more ({remaining} more)",
+                      command=self.show_more, bg="#2b2b2b", fg=FG, bd=0, cursor="hand2",
+                      font=("Segoe UI", 9, "bold"), activebackground=BG,
+                      activeforeground=FG).grid(
+                row=len(cands) // COLS + 1, columnspan=COLS, sticky="ew", padx=4,
+                pady=(4, 2))
+
         self._bind_keys()
         self.set_selected(0)
 
         # Warn when nothing really matched - better than silently showing noise.
         best = cands[0].get("score", 0.0) if cands else 0.0
         if best < core.MIN_SCORE:
-            self.status(f"{query}  \u2014  no strong match (best {best:.2f})")
+            self.status(f"{self.query}  \u2014  no strong match (best {best:.2f})")
         else:
-            self.status(f"{query}  \u2014  best match {best:.2f}")
+            self.status(f"{self.query}  \u2014  best match {best:.2f}")
 
         self.win.focus_force()
         # Close when the user clicks away - but only start listening once the
@@ -173,6 +195,7 @@ class Popup:
             w.bind(str(n), lambda e, n=n: self.paste_index(n - 1))
         w.bind("o", lambda e: self.open_source())
         w.bind("c", lambda e: self.copy_credit())
+        w.bind("m", lambda e: self.show_more())
 
     def move(self, delta: int):
         if not self.candidates:
