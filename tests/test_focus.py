@@ -46,9 +46,34 @@ def test_capture_finds_the_foreground_window(window):
     assert focus.top_level != 0, "we should have found a foreground window"
 
 
-def test_capture_also_finds_the_focused_child(window):
-    focus = ezsearch_focus.capture()
-    assert focus.child != 0, "the focused child control should be captured too"
+def test_capture_maps_the_focused_child_control(monkeypatch):
+    """The child half of a Focus snapshot comes from GetGUIThreadInfo's hwndFocus.
+
+    This is scripted rather than read from the live desktop on purpose: the
+    foreground window belongs to whatever the test runner is sitting in, so a
+    real read would test the tester, not EZsearch. The live path - finding the
+    foreground window itself - is covered by the test above; the restore tests
+    below exercise the real Win32 calls against the Tk window.
+    """
+    calls = {"hwnd": None}
+
+    def fake_thread_id(hwnd, ptr):
+        calls["hwnd"] = hwnd
+        return 77
+
+    def fake_thread_info(thread_id, ref):
+        assert thread_id == 77
+        info = ref._obj
+        info.hwndFocus = 0xBEEF
+        return 1
+
+    monkeypatch.setattr(ezsearch_focus.user32, "GetWindowThreadProcessId", fake_thread_id)
+    monkeypatch.setattr(ezsearch_focus.user32, "GetGUIThreadInfo", fake_thread_info)
+
+    focus = ezsearch_focus._focus_from_hwnd(1234)
+    assert calls["hwnd"] == 1234
+    assert focus.top_level == 1234
+    assert focus.child == 0xBEEF, "the caret's child control must survive into Focus"
 
 
 def test_restore_runs_the_action(window):

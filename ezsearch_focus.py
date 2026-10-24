@@ -105,8 +105,9 @@ if SYSTEM == "Windows":
 
     _SW_RESTORE = 9
 
-    def _capture_windows() -> Focus:
-        hwnd = user32.GetForegroundWindow()
+    def _focus_from_hwnd(hwnd: int) -> Focus:
+        """Build the Focus snapshot for one top-level window (also used by tests)."""
+        hwnd = int(hwnd or 0)
         if not hwnd:
             return Focus()
         thread_id = user32.GetWindowThreadProcessId(hwnd, None)
@@ -116,7 +117,10 @@ if SYSTEM == "Windows":
             info.cbSize = ctypes.sizeof(info)
             if user32.GetGUIThreadInfo(thread_id, ctypes.byref(info)):
                 child = int(info.hwndFocus or 0)
-        return Focus(top_level=int(hwnd), child=child)
+        return Focus(top_level=hwnd, child=child)
+
+    def _capture_windows() -> Focus:
+        return _focus_from_hwnd(user32.GetForegroundWindow())
 
     def _restore_windows(focus: Focus, action) -> bool:
         """Put the caret back where it was, run `action` (the paste), then let go.
