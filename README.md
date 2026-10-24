@@ -1,11 +1,10 @@
 ﻿# EZsearch
 
-**Select a sentence. Press one hotkey. Click a picture. It lands in your document.**
+**Select a sentence. Press the shortcut key. Click a picture. It gets pasted right in your document, whether it's word, docs or ppt.**
 
-Finding a picture for one sentence means: new tab, search engine, scroll, right-click, copy, back to
-the document, paste. Seven steps, and your train of thought is gone by step three.
-
-EZsearch collapses that into one hotkey and one click.
+Imagine you're finished with your report, and then you remember you need to paste photos! It can be such a hectic task, google search and then try to find a good quality, not blurred, not watermarked, perfect picture describing what you want, then having to copy from google, go back to your document and paste. 
+I'm an avid lazy person, someone who chose to study comp sci because apparantly all you need is a laptop and you can work while sitting anywhere. 
+Hence, to simplify this tedious process I built EZSearch. 
 
 ![The EZsearch popup](docs/screenshot.png)
 
@@ -14,7 +13,7 @@ EZsearch collapses that into one hotkey and one click.
 ## How it works
 
 1. You select a sentence anywhere - Word, Google Docs, PowerPoint, OneNote, a browser.
-2. You press **Ctrl+Alt+F**.
+2. You press **Ctrl+Shift+X**.
 3. A small popup appears next to the cursor with the best-matching pictures.
 4. You click one. It is pasted straight into your document. No tab switching.
 
