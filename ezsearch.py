@@ -82,6 +82,7 @@ def grab_selection() -> str:
 def run_pipeline() -> None:
     if not busy.acquire(blocking=False):
         return
+    focus = None
     try:
         # Remember where the user was typing *before* any popup steals focus.
         focus = ezsearch_focus.capture()
@@ -123,7 +124,10 @@ def run_pipeline() -> None:
             return
         ui_queue.put(("results", used_query, cands))
     except Exception as e:
-        ui_queue.put(("status", f"Error: {e}"))
+        # An error before the popup opened used to be invisible and look like
+        # "the hotkey did nothing" - now it shows a popup and a console line.
+        print(f"EZsearch error: {e}")
+        ui_queue.put(("open", f"Error: {e}", focus))
     finally:
         busy.release()
 

@@ -8,10 +8,10 @@ Each model starts from an empty image and vector cache, so the first search is m
 
 | Stage | llama3.2:3b (direct) | llama3.2:3b (paraphrase) | gemma3:4b (direct) | gemma3:4b (paraphrase) |
 |---|---|---|---|---|
-| LLM query build | 3.77 s | 3.51 s | 4.32 s | 4.67 s |
-| Image search (API) | 1.92 s | 1.89 s | 1.78 s | 1.96 s |
-| Download + CLIP scoring (overlapped) | 8.49 s | 6.32 s | 4.81 s | 6.06 s |
-| **Total: sentence to picture** | 13.43 s | 11.51 s | 12.00 s | 13.32 s |
+| LLM query build | 2.76 s | 2.70 s | 3.41 s | 3.42 s |
+| Image search (API) | 2.20 s | 2.39 s | 1.80 s | 1.99 s |
+| Download + CLIP scoring (overlapped) | 2.99 s | 1.96 s | 2.24 s | 3.09 s |
+| **Total: sentence to picture** | 8.57 s | 7.21 s | 7.64 s | 8.83 s |
 
 ## Does re-ranking actually help?
 
@@ -22,16 +22,16 @@ The same candidate pool, ranked two ways: in the order the search engine returne
 | Ranking | Top 1 | Top 3 |
 |---|---|---|
 | llama3.2:3b - search order (keywords only) | 10/12 (83%) | 11/12 (91%) |
-| llama3.2:3b - CLIP re-ranked | 7/12 (58%) | 11/12 (91%) |
+| llama3.2:3b - CLIP re-ranked | 10/12 (83%) | 11/12 (91%) |
 | gemma3:4b - search order (keywords only) | 9/12 (75%) | 9/12 (75%) |
-| gemma3:4b - CLIP re-ranked | 7/12 (58%) | 10/12 (83%) |
+| gemma3:4b - CLIP re-ranked | 9/12 (75%) | 9/12 (75%) |
 
 ### 2. Paraphrased sentences (the picture's file name does not contain the sentence's words)
 
 | Ranking | Top 1 | Top 3 |
 |---|---|---|
 | llama3.2:3b - search order (keywords only) | 4/8 (50%) | 5/8 (62%) |
-| llama3.2:3b - CLIP re-ranked | 4/8 (50%) | 4/8 (50%) |
+| llama3.2:3b - CLIP re-ranked | 4/8 (50%) | 5/8 (62%) |
 | gemma3:4b - search order (keywords only) | 6/8 (75%) | 6/8 (75%) |
 | gemma3:4b - CLIP re-ranked | 6/8 (75%) | 6/8 (75%) |
 
@@ -41,8 +41,8 @@ Both sets together (12 direct sentences + 8 paraphrases), ranked in the order th
 
 | Model | LLM time (median) | Top 1 | Top 3 |
 |---|---|---|---|
-| llama3.2:3b | 3.54 s | 14/20 (70%) | 16/20 (80%) |
-| gemma3:4b | 4.53 s | 15/20 (75%) | 15/20 (75%) |
+| llama3.2:3b | 2.71 s | 14/20 (70%) | 16/20 (80%) |
+| gemma3:4b | 3.41 s | 15/20 (75%) | 15/20 (75%) |
 
 ## Every query that was built
 
