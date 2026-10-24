@@ -20,3 +20,6 @@ Thumbs.db
 *.log
 _preload.py
 .benchmark_cache/
+
+# Agent session exports (may contain local paths / private transcript)
+opencode-session*.json
