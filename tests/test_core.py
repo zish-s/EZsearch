@@ -257,6 +257,19 @@ def test_dedupe_collapses_uploads_sharing_a_work_category():
     assert len(core._dedupe([a, b])) == 1
 
 
+def test_word_selection_fallback_survives_a_missing_word(monkeypatch):
+    """The COM fallback returns an empty string, never an exception."""
+    if core.SYSTEM != "Windows":
+        pytest.skip("Windows only")
+    import ezsearch as app
+
+    def boom(_name):
+        raise OSError("Word is not running")
+
+    monkeypatch.setattr("win32com.client.GetActiveObject", boom)
+    assert app.selection_from_word() == ""
+
+
 def test_identical_previews_are_dropped(monkeypatch):
     """Different pages, different file names, same pixels -> one tile."""
     class FakeRanker:

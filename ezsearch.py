@@ -61,12 +61,19 @@ def selection_from_word() -> str:
     if SYSTEM != "Windows":
         return ""
     try:
+        import pythoncom
+        pythoncom.CoInitialize()     # COM is per-thread: the pipeline runs on
+    except Exception:                # its own, so this must not be skipped
+        return ""
+    try:
         import win32com.client
         word = win32com.client.GetActiveObject("Word.Application")
         text = word.ActiveWindow.Selection.Text or ""
         return str(text).replace("\r", " ").replace("\x07", " ").strip()
     except Exception:
         return ""
+    finally:
+        pythoncom.CoUninitialize()
 
 
 def grab_selection() -> str:
@@ -105,6 +112,11 @@ def run_pipeline() -> None:
         return
     focus = None
     try:
+        # If a popup from the previous run is still open it owns the focus:
+        # dismiss it and wait, so capture sees the user's document, not us.
+        closed = threading.Event()
+        ui_queue.put(("close", closed))
+        closed.wait(0.6)
         # Remember where the user was typing *before* any popup steals focus.
         focus = ezsearch_focus.capture()
         sentence = grab_selection()
@@ -291,6 +303,10 @@ def main():
                 kind = msg[0]
                 if kind == "open":
                     popup.open(msg[1], msg[2])
+                elif kind == "close":
+                    popup.close()
+                    if msg[1] is not None:
+                        msg[1].set()
                 elif kind == "status":
                     popup.status(msg[1])
                 elif kind == "results":
