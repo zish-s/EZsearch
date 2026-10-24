@@ -22,14 +22,30 @@ So I built the thing that removes the seven steps.
 
 *This is the real popup, rendered by `scripts/screenshot.py` with the real pipeline - not a mockup.*
 
-**Select a sentence anywhere - Word, Google Docs, PowerPoint, OneNote, a browser. Press `Ctrl+Alt+F`.
-A small panel appears next to the cursor with the best-matching pictures. Click one and it is pasted
-straight into the document you were already typing in.**
+**Select a sentence anywhere - Word, Google Docs, PowerPoint, OneNote, a browser. Press
+`Ctrl+Shift+X`. A small panel appears next to the cursor with up to eight matching pictures. Click
+one and it is pasted after your sentence - the sentence stays - in the document you were already
+typing in.** (An earlier build used `Ctrl+Alt+F`, which turned out to be Word's *Insert Footnote*
+accelerator: Word accepted the keystroke and also inserted a footnote. It is two keys now.)
 
 Ctrl+click opens the page the picture came from. Right-click copies a finished attribution line.
-Arrow keys and Enter work too, because not everyone wants to use a mouse.
+Arrow keys and Enter work too, because not everyone wants to use a mouse, and **m** or a
+**+ show more** tile pages through the rest of the scored pool.
 
 That is the whole product. The interesting part is what it took to make the last sentence true.
+
+---
+
+## Demo
+
+<!-- Screenshots and a short GIF go here - press Ctrl+Shift+X over a Word selection,
+     the grid appearing, then the picture landing under the sentence. -->
+
+*placeholder 1: the hotkey over a selection in Word*
+
+*placeholder 2: the popup grid with match bars*
+
+*placeholder 3: the picture pasted below the sentence, sentence intact*
 
 ---
 
@@ -58,7 +74,8 @@ The pipeline is deliberately boring:
                               |
                  local CLIP scores each one against the whole sentence
                               v
-                 the first 8, in a panel next to your cursor
+                 8 tiles in a panel next to your cursor
+                 (a show-more page reveals the rest of the pool)
 ```
 
 ---
@@ -182,6 +199,16 @@ restriction) followed by `SetFocus` on the **child**, not the frame. `AttachThre
 detached afterwards or the user loses keyboard control system-wide - so the detach lives in a
 `finally` block.
 
+The same Word behaviour bites the *capture* side, and I only found that out by testing with a real
+document. A synthesised `Ctrl+C` is as ignorable as a synthesised Ctrl+V: the clipboard stays
+untouched, so the app concludes nothing was selected. Word's own automation is the second way in -
+`GetActiveObject("Word.Application")` and read `ActiveWindow.Selection`. That read also collapsed
+the selection to its end, which is why the paste appends after your sentence instead of eating it.
+Two details made the fallback work only in tests at first: COM has to be initialised per *thread*
+(`pythoncom.CoInitialize` on the pipeline thread), and a popup from the previous run can still hold
+the focus, so it is dismissed before the capture. Now capture and paste each have a keys path and
+an automation path.
+
 **2. A verbose query matched nothing at all.** MediaWiki's search ANDs every term together, so
 "lighthouse stood against violent storm" returned zero results, because "stood" and "against" are
 not words that appear in file names. My first LLM prompt produced exactly that kind of query, and
@@ -190,6 +217,18 @@ the app showed an empty grid and looked broken.
 Now EZsearch shortens the query until the sources actually answer: full query, then the first three
 words, then two, then one. It is a two-line fix, and it turned a guaranteed empty grid into one that
 almost always has something in it.
+
+**The reverse failure showed up on a live query: "The roundabouts in chandigarh".** The clean query
+matched exactly one Commons file, so the app used to *shrink* the query to "roundabout" and show
+twenty roundabouts from Poznań, Nairobi and Bamako - technically correct, topically wrong. The new
+ladder is precision-first: the query as given and the de-filler words lead the grid ("roundabout
+chandigarh"), and when filename search is thin, Commons' *category space* is mined directly - files
+live in "Road bridges in Chandigarh" and "National highways in Chandigarh", not in anything somebody
+named "roundabout chandigarh". The closest broader phrasing then fills out the pool behind the
+topical head, so the *show more* pages still have variety. One more lesson from the same live test:
+Openverse had failed silently minutes earlier and was locked out for ten minutes, so the grid was
+Commons-only and looked broken. The lockout is a minute now and each source waits longer and retries
+once before giving up.
 
 **3. A silently cached zero vector poisoned every later run.** My scorer embedded images in a
 batch and had a bare `except` around it. One bad image made the whole batch fail, the handler
@@ -215,10 +254,11 @@ Now a candidate is dropped when its categories or its title say it is a painting
 engraving or diagram - or when one of its categories follows Commons' convention for naming a
 single work, "*title* by *artist*". I only learned that one from the live app: the same painting
 kept sliding through under three unrelated file names, and the only thing all three had in common
-was a category called "Stürmische See mit Leuchtturm by Carl Blechen". EZsearch asks Commons for
-twice as many results to make up for the ones it filters out, and falls back to artwork only if
-the grid would otherwise be empty. `EZSEARCH_ALLOW_ART=1`
-turns the filter off.
+was a category called "Stürmische See mit Leuchtturm by Carl Blechen". The same work-category
+doubling as an identity key is what now collapses those re-uploads, together with a 64-bit hash
+that drops literally identical previews. EZsearch asks Commons for twice as many results to make up
+for the ones it filters out, and falls back to artwork only if the grid would otherwise be empty.
+`EZSEARCH_ALLOW_ART=1` turns the filter off.
 
 ---
 
@@ -262,7 +302,7 @@ First run downloads the CLIP weights (~600 MB, cached afterwards). After that it
 and ranks entirely offline.
 
 ```bash
-python -m pytest        # 57 offline tests
+python -m pytest        # 64 offline tests
 python ezsearch.py --doctor
 python ezsearch.py --search "a sentence"   # headless
 ```

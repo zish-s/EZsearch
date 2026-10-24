@@ -1,10 +1,10 @@
 ﻿# EZsearch
 
-**Select a sentence. Press the shortcut key. Click a picture. It gets pasted right in your document, whether it's word, docs or ppt.**
+**Select a sentence. Press the shortcut key. Click a picture. It gets pasted right in your document, whether it's Word, Docs or PowerPoint.**
 
-Imagine you're finished with your report, and then you remember you need to paste photos! It can be such a hectic task, google search and then try to find a good quality, not blurred, not watermarked, perfect picture describing what you want, then having to copy from google, go back to your document and paste. 
-I'm an avid lazy person, someone who chose to study comp sci because apparantly all you need is a laptop and you can work while sitting anywhere. 
-Hence, to simplify this tedious process I built EZSearch. 
+Imagine you're finished with your report, and then you remember you need to paste photos! It can be such a hectic task: Google search, then try to find a good quality, not blurred, not watermarked, perfect picture describing what you want, then copy from Google, go back to your document and paste.
+
+I'm an avid lazy person, someone who chose to study comp sci because apparently all you need is a laptop and you can work while sitting anywhere. Hence, to simplify this tedious process I built EZsearch.
 
 ![The EZsearch popup](docs/screenshot.png)
 
@@ -13,13 +13,18 @@ Hence, to simplify this tedious process I built EZSearch.
 ## How it works
 
 1. You select a sentence anywhere - Word, Google Docs, PowerPoint, OneNote, a browser.
-2. You press **Ctrl+Shift+X**.
-3. A small popup appears next to the cursor with the best-matching pictures.
-4. You click one. It is pasted straight into your document. No tab switching.
+2. You press **Ctrl+Shift+X** (an earlier build used Ctrl+Alt+F, which turns out to be Word's
+   *Insert Footnote* accelerator - Word accepted the keystroke *and* added a footnote).
+3. A small popup appears next to the cursor with up to eight matching pictures, plus a
+   **+ show more** tile for the rest of the scored pool.
+4. You click one. The picture is pasted **after your sentence** - the sentence stays. No tab
+   switching: if Word ignores the synthetic keystrokes, the capture and the paste both go over
+   Word's own automation instead.
 
 | You want to... | Do this |
 |---|---|
 | Paste the picture | **Click** it |
+| Show more of the scored pool | **m** or click **+ show more** |
 | Open the page the picture came from | **Ctrl+click** it |
 | Copy a ready-made credit line | **Right-click** it |
 | Move the selection | **Arrow keys** |
@@ -116,12 +121,13 @@ Everything is an environment variable - no code edits needed.
 | `EZSEARCH_FULL_WIDTH` | `1600` | Width of the picture that gets pasted |
 | `EZSEARCH_OPENVERSE` | `1` | Set to `0` to search Wikimedia Commons only |
 | `EZSEARCH_OPENVERSE_PHOTOS` | `1` | Prefer photographs over illustrations on Openverse |
+| `EZSEARCH_OPENVERSE_TIMEOUT` | `8` | Seconds per Openverse attempt (it is slow in bursts) |
 | `OPENVERSE_CLIENT_ID` / `OPENVERSE_CLIENT_SECRET` | unset | Optional: a free key raises Openverse's anonymous rate limit |
 | `OLLAMA_URL` | `http://localhost:11434/api/generate` | Point at a different Ollama |
 
 Openverse works without a key on its anonymous quota (about 200 requests a day at the time of
-writing); a free key raises the limit. If Openverse is slow or unreachable, EZsearch skips it for ten
-minutes and keeps using Commons.
+writing); a free key raises the limit. If Openverse is slow or unreachable, EZsearch gives it a
+longer read timeout and one retry, then skips it for a minute and keeps using Commons.
 
 ---
 
@@ -159,18 +165,29 @@ minutes and keeps using Commons.
 `SetForegroundWindow` alone is not enough - the frame activates but the key press lands on the
 wrong window and the picture disappears. EZsearch captures the focused child before the popup
 appears and restores it with `AttachThreadInput` + `SetFocus`, which is the part that makes the
-whole product work.
+whole product work. And because Word can just as quietly ignore a synthetic **Ctrl+C** as a
+synthetic Ctrl+V, both halves have a second way in: the selection is read over Word's automation
+(and COM must be initialised on *every thread*, which the pipeline thread is not), and the chosen
+picture is pasted over `Selection.Paste()` when keystrokes go missing.
 
-**2. A chatty query that matches nothing.** MediaWiki ANDs every term together, so
-"lighthouse stood against violent storm" returns zero results - "stood" and "against" are not
-words that appear in file names. EZsearch shortens the query until the sources actually answer:
-full query, then the first three words, then two, then one.
+**2. A chatty query that matches nothing - or matches too little to choose from.** MediaWiki ANDs
+every term together, so "lighthouse stood against violent storm" returns zero results - "stood" and
+"against" are not words that appear in file names. And a narrow topic can go the other way: "roundabout
+in chandigarh" matches exactly one Commons file. The query ladder is therefore about *precision first,
+variety second*: the query as given and the same words without filler ("roundabout chandigarh") lead
+the grid; when filename search is thin, Commons' **category space** is mined ("Road bridges in
+Chandigarh", "National highways in Chandigarh"); the nearest broader phrasing then tops the pool up,
+so Show more still has pages. Only when nothing topical exists do the shorter prefixes take over.
 
-**3. Not showing you six pictures of nothing.** CLIP is only as good as the pool it scores, so
-EZsearch pulls 24 candidates and shows the first 8 that survive the licence and artwork filters.
-Every tile carries a match-strength bar, and if nothing really matches you are told so instead of
-being shown noise. Commons is an archive rather than a stock library, so paintings, engravings and
-diagrams are dropped by their Commons categories (set `EZSEARCH_ALLOW_ART=1` to keep them).
+**3. Not showing you six pictures of nothing - nor six of the same picture.** CLIP is only as good as
+the pool it scores, so EZsearch pulls 24 candidates and shows 8 at a time over the whole scored pool
+with a **+ show more** tile. Three kinds of duplication are collapsed: the same upload twice (page
+and URL), the same work uploaded again under other names (a Commons category named "*title* by
+*artist*" is the identity key), and pictures that are literally identical pixels (a 64-bit picture
+hash of the preview). Every tile carries a match-strength bar, and if nothing really matches you are
+told so instead of being shown noise. Commons is an archive rather than a stock library, so paintings,
+engravings and diagrams are dropped by their Commons categories (set `EZSEARCH_ALLOW_ART=1` to keep
+them).
 
 **4. Doing the slow things at the same time.** Downloading a picture is network-bound and embedding
 it is CPU-bound, so EZsearch does both at once: pictures are embedded in small batches the moment
@@ -255,7 +272,7 @@ the whole point of showing you where each one came from.
 pip install -r requirements.txt
 pip install pytest
 
-python -m pytest                 # 57 offline tests, no network, no models
+python -m pytest                 # 64 offline tests, no network, no models
 python benchmark.py              # latency + "does CLIP actually help" + model comparison
 python ezsearch.py --doctor      # check that everything is in place
 python ezsearch.py --search "a sentence"    # run the pipeline headless
