@@ -69,11 +69,25 @@ def selection_from_word() -> str:
         import win32com.client
         word = win32com.client.GetActiveObject("Word.Application")
         text = word.ActiveWindow.Selection.Text or ""
-        return str(text).replace("\r", " ").replace("\x07", " ").strip()
-    except Exception:
+        text = str(text).replace("\r", " ").replace("\x07", " ").strip()
+        if text:
+            sample = " ".join(text.split()[:6])
+            print(f"EZsearch: Word COM fallback returned the selection: {sample!r}...")
+        return text
+    except Exception as e:
+        print(f"EZsearch: Word COM fallback failed: {type(e).__name__}: {e}")
         return ""
     finally:
         pythoncom.CoUninitialize()
+
+
+def _window_title(hwnd: int) -> str:
+    if SYSTEM != "Windows" or not hwnd:
+        return ""
+    import ctypes
+    buf = ctypes.create_unicode_buffer(256)
+    ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
+    return buf.value
 
 
 def grab_selection() -> str:
@@ -119,6 +133,8 @@ def run_pipeline() -> None:
         closed.wait(0.6)
         # Remember where the user was typing *before* any popup steals focus.
         focus = ezsearch_focus.capture()
+        if SYSTEM == "Windows" and focus.top_level:
+            print(f"EZsearch: capturing from {_window_title(focus.top_level)!r}")
         sentence = grab_selection()
         if not sentence:
             ui_queue.put(("open", "Select a sentence first", focus))

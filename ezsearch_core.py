@@ -967,3 +967,29 @@ def copy_image(img: Image.Image) -> None:
         _macos_copy_image(img)
     else:
         _linux_copy_image(img)
+
+
+def word_selection_paste() -> bool:
+    """Paste the clipboard into the running Word, at its caret, over COM.
+
+    If Word ignores synthesised Ctrl+V as silently as it can ignore a
+    synthesised Ctrl+C, this is the way the picture still lands: automation
+    does not depend on keyboard focus at all. Return True when the paste
+    happened, so the caller can skip sending any keys.
+    """
+    if SYSTEM != "Windows":
+        return False
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()      # per-thread; see selection fallback
+    except Exception:
+        return False
+    try:
+        import win32com.client
+        word = win32com.client.GetActiveObject("Word.Application")
+        word.ActiveWindow.Selection.Paste()
+        return True
+    except Exception:
+        return False
+    finally:
+        pythoncom.CoUninitialize()

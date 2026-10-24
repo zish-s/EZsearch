@@ -216,6 +216,10 @@ class Popup:
         ezsearch_focus.restore(self.focus, self._send_paste)
 
     def _send_paste(self):
+        # Prefer Word's own automation: if Word is ignoring synthesised keys
+        # (it can), Selection.Paste() still lands the picture at the caret.
+        if core.word_selection_paste():
+            return
         from pynput.keyboard import Controller, Key
         kb = Controller()
         mod = Key.cmd if core.SYSTEM == "Darwin" else Key.ctrl
