@@ -32,36 +32,79 @@ def test_query_variants_rewrites_before_shortening():
     assert len(variants) == len(set(variants))     # no repeated phrasing
 
 
+def _cmd(name):
+    return {"page": f"https://p/{name}", "thumb": f"https://t/{name}",
+            "full": "", "title": name, "creator": "A", "license": "CC BY 4.0",
+            "source": "Wikimedia Commons"}
+
+
 def test_resolve_query_ignores_a_one_hit_pool(monkeypatch):
     calls = []
 
     def fake_search_all(variant, n, allow):
         calls.append(variant)
         if variant == "roundabout in chandigarh":
-            return ["the one Commons hit"]
+            return [_cmd("the one Commons hit")]
         if variant == "roundabout chandigarh":
-            return [f"pool{i}" for i in range(8)]
+            return [_cmd(f"pool{i}") for i in range(8)]
         return []
 
     monkeypatch.setattr(core, "_search_all", fake_search_all)
     variant, cands = core.resolve_query("roundabout in chandigarh")
     assert variant == "roundabout chandigarh"
-    assert len(cands) == 8
+    assert len(cands) == 9, "the one topical hit must lead the richer pool"
+    assert cands[0]["title"] == "the one Commons hit"
     assert "roundabout chandigarh" in calls
 
 
 def test_resolve_query_falls_back_to_the_biggest_pool(monkeypatch):
     def fake_search_all(variant, n, allow):
         if variant == "roundabout in chandigarh":
-            return ["the one Commons hit"]
+            return [_cmd("the one Commons hit")]
         if variant == "roundabout":
-            return [f"pool{i}" for i in range(3)]     # small, but the biggest
+            return [_cmd(f"pool{i}") for i in range(3)]   # small, but the biggest
         return []
 
     monkeypatch.setattr(core, "_search_all", fake_search_all)
     variant, cands = core.resolve_query("roundabout in chandigarh")
     assert variant == "roundabout"
     assert len(cands) == 3
+
+
+def test_resolve_query_leads_with_topical_hits_and_tops_up(monkeypatch):
+    """Topical phrasings win the head of the grid; broad phrasing fills the rest."""
+    def fake_search_all(variant, n, allow):
+        if variant == "roundabout in chandigarh":
+            return [_cmd("topic1")]
+        if variant == "roundabout chandigarh":
+            return [_cmd("topic2")]
+        if variant == "roundabout in":
+            return [_cmd(f"broad{i}") for i in range(10)]
+        return []
+
+    monkeypatch.setattr(core, "_search_all", fake_search_all)
+    monkeypatch.setattr(core, "commons_category_files",
+                        lambda query, n: [_cmd(f"cat{i}") for i in range(3)])
+    variant, cands = core.resolve_query("roundabout in chandigarh")
+    assert variant == "roundabout chandigarh"
+    heads = [c["title"] for c in cands[:5]]
+    assert heads[:4] == ["topic1", "topic2", "cat0", "cat1"], heads   # topical first
+    assert len(cands) >= core.MIN_POOL                               # broad filled
+
+
+def test_resolve_query_skips_categories_when_the_pool_is_already_rich(monkeypatch):
+    def fake_search_all(variant, n, allow):
+        return [_cmd(f"x{i}") for i in range(9)] if variant == "rich query" else []
+
+    monkeypatch.setattr(core, "_search_all", fake_search_all)
+
+    def boom(query, n):
+        raise AssertionError("categories must not be mined when the pool is rich")
+
+    monkeypatch.setattr(core, "commons_category_files", boom)
+    variant, cands = core.resolve_query("rich query")
+    assert variant == "rich query"
+    assert len(cands) == 9
 
 
 def test_fallback_query_never_returns_empty():
@@ -405,10 +448,9 @@ def test_search_images_survives_a_dead_source(monkeypatch):
     def boom(query, n):
         raise RuntimeError("openverse is down")
     monkeypatch.setattr(core, "search_commons",
-                        lambda q, n: [{"page": "https://commons/1", "thumb": "https://c/1",
-                                       "full": "", "title": "c1", "creator": "A",
-                                       "license": "CC BY 4.0", "source": "Wikimedia Commons"}])
+                        lambda q, n: [_cmd("c1")])
     monkeypatch.setattr(core, "search_openverse", boom)
+    monkeypatch.setattr(core, "commons_category_files", lambda q, n: [])
     results = core.search_images("lighthouse", 6)
     assert len(results) == 1
 
@@ -419,6 +461,7 @@ def test_search_images_falls_back_when_every_licence_is_restrictive(monkeypatch)
                                        "full": "", "title": "c1", "creator": "A",
                                        "license": "CC BY-NC 4.0", "source": "Wikimedia Commons"}])
     monkeypatch.setattr(core, "search_openverse", lambda q, n: [])
+    monkeypatch.setattr(core, "commons_category_files", lambda q, n: [])
     results = core.search_images("lighthouse", 6)
     assert len(results) == 1, "an empty grid is worse than a licence we should double check"
 

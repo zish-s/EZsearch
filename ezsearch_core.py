@@ -314,68 +314,139 @@ def is_artwork_category(categories: list[str]) -> bool:
     )
 
 
+def _commons_candidate(p: dict) -> dict | None:
+    """One Commons file page -> one candidate dict (None for unusable pages)."""
+    info = (p.get("imageinfo") or [None])[0]
+    if not info or info.get("mime") not in ("image/jpeg", "image/png"):
+        return None
+    meta = info.get("extmetadata", {})
+    licence = _strip_html(
+        meta.get("LicenseShortName", {}).get("value", "")
+        or meta.get("License", {}).get("value", "")
+        or meta.get("UsageTerms", {}).get("value", "")
+    )
+    thumb = info.get("thumburl") or info.get("url")
+    if not thumb:
+        return None
+    title = p.get("title", "").removeprefix("File:").rsplit(".", 1)[0]
+    categories = [c.get("title", "") for c in p.get("categories", [])]
+    # A category named "<something> by <artist>" names one specific *work*
+    # of art; two uploads of the same painting carry the same category, so
+    # it doubles as an identity key.
+    work_key = ""
+    for cat in categories:
+        if _BY_ARTIST.search(cat):
+            work_key = _norm_key_text(cat)
+            break
+    return {
+        "thumb": thumb,
+        # The original can be enormous, so the fallback is the preview
+        # rendering rather than the source file. full_image() asks Commons
+        # for a 1600px version when it can.
+        "full": thumb,
+        "page": info.get("descriptionurl", ""),
+        "file_title": p.get("title", ""),
+        "title": title,
+        "creator": _strip_html(meta.get("Artist", {}).get("value", "")) or "Unknown",
+        "license": licence,
+        "source": "Wikimedia Commons",
+        "work_key": work_key,
+        "artwork": is_artwork(title) or is_artwork_category(categories),
+    }
+
+
+def _prefer_photographs(candidates: list[dict]) -> list[dict]:
+    """Drop artwork unless the pool would otherwise be empty."""
+    if os.getenv("EZSEARCH_ALLOW_ART", "0") != "1":
+        photos = [c for c in candidates if not c.get("artwork")]
+        if photos:
+            return photos
+    return candidates
+
+
+def _commons_pages(params: dict, n: int) -> list[dict]:
+    """Run a Commons batch query and return the mapped, de-artworked pages."""
+    params = {"action": "query", "format": "json",
+              "prop": "imageinfo|categories", "iiprop": "url|extmetadata|mime|size",
+              "iiurlwidth": PREVIEW_WIDTH, "cllimit": "max", "clshow": "!hidden",
+              **params}
+    r = requests.get("https://commons.wikimedia.org/w/api.php", params=params,
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    pages = (r.json().get("query") or {}).get("pages", {})
+    ranked = sorted(pages.values(), key=lambda p: p.get("index", p.get("title", "")))
+    out = [c for c in (_commons_candidate(p) for p in ranked) if c]
+    return _prefer_photographs(out)[:n]
+
+
 def search_commons(query: str, n: int) -> list[dict]:
     """Wikimedia Commons: no API key, generous limits, every file has a licence."""
     # Ask for more than we need: roughly half of a Commons result page is
     # paintings and engravings, and those get filtered out below.
     fetch = min(max(n * 2, 12), 50)
-    params = {
-        "action": "query", "format": "json", "origin": "*",
+    return _commons_pages({
         "generator": "search", "gsrnamespace": 6, "gsrlimit": fetch,
         "gsrsearch": f"{query} filetype:bitmap",
-        "prop": "imageinfo|categories", "iiprop": "url|extmetadata|mime|size",
-        "iiurlwidth": PREVIEW_WIDTH, "cllimit": "max", "clshow": "!hidden",
-    }
-    r = requests.get("https://commons.wikimedia.org/w/api.php", params=params,
-                     headers={"User-Agent": UA}, timeout=15)
+    }, n)
+
+
+_TRAFFIC_OR = ("(roundabout OR junction OR circle OR crossing OR intersection"
+               " OR road OR street OR traffic OR bridge OR highway OR transport)")
+"""Nouns that get a *place* into Commons' road/transport categories."""
+
+
+def commons_category_files(query: str, n: int) -> list[dict]:
+    """Mine Commons *category* space when filename search comes up dry.
+
+    Commons files are rarely named after what they show: "roundabout
+    chandigarh" has neither file hits nor a category with those words, but the
+    photographs live in category space - "Road bridges in Chandigarh",
+    "National highways in Chandigarh" and friends. Search that namespace for
+    the query's location word plus traffic nouns, walk the best-matching
+    categories, and return their files under the same rules as any other
+    Commons answer (licences, artwork filter, same dict shape).
+    """
+    words = [w for w in query.split() if w.lower() not in STOPWORDS]
+    if len(words) < 2:          # a lone keyword: file search is already enough
+        return []
+    place = words[-1].lower()
+
+    r = requests.get("https://commons.wikimedia.org/w/api.php", params={
+        "action": "query", "format": "json", "list": "search",
+        "gsrsearch": f"{words[-1]} {_TRAFFIC_OR}", "gsrnamespace": 14,
+        "gsrlimit": 30, "srprop": "",
+    }, headers={"User-Agent": UA}, timeout=15)
     r.raise_for_status()
-    pages = (r.json().get("query") or {}).get("pages", {})
-    out = []
-    for p in sorted(pages.values(), key=lambda p: p.get("index", 0)):
-        info = (p.get("imageinfo") or [None])[0]
-        if not info or info.get("mime") not in ("image/jpeg", "image/png"):
+    hits = [h.get("title", "") for h in (r.json().get("query") or {}).get("search", [])]
+
+    def score(cat: str) -> int:
+        text = cat.lower()
+        if place not in text:
+            return -999         # other cities' categories stay out
+        value = 0
+        if re.search(r"roundabout|junction|circle|crossing|intersection", text):
+            value += 3          # the closest thing to the user's noun first
+        if re.search(r"\broad|street|traffic|transport|highway|bridge", text):
+            value += 2
+        if re.search(r"rail|railway|bus|metro", text):
+            value -= 2          # rail/bus stops are not road scenes
+        return value
+
+    ranked_cats = [c for c in sorted(hits, key=score, reverse=True) if score(c) > 0]
+    out: list[dict] = []
+    for cat in ranked_cats[:2]:
+        try:
+            got = _commons_pages({
+                "generator": "categorymembers", "gcmtitle": cat,
+                "gcmtype": "file", "gcmlimit": str(min(max(n, 12), 40)),
+            }, n)
+        except Exception:
             continue
-        meta = info.get("extmetadata", {})
-        licence = _strip_html(
-            meta.get("LicenseShortName", {}).get("value", "")
-            or meta.get("License", {}).get("value", "")
-            or meta.get("UsageTerms", {}).get("value", "")
-        )
-        thumb = info.get("thumburl") or info.get("url")
-        if not thumb:
-            continue
-        title = p.get("title", "").removeprefix("File:").rsplit(".", 1)[0]
-        categories = [c.get("title", "") for c in p.get("categories", [])]
-        # A category named "<something> by <artist>" names one specific *work*
-        # of art; two uploads of the same painting carry the same category, so
-        # it doubles as an identity key.
-        work_key = ""
-        for cat in categories:
-            if _BY_ARTIST.search(cat):
-                work_key = _norm_key_text(cat)
-                break
-        out.append({
-            "thumb": thumb,
-            # The original can be enormous, so the fallback is the preview
-            # rendering rather than the source file. full_image() asks Commons
-            # for a 1600px version when it can.
-            "full": thumb,
-            "page": info.get("descriptionurl", ""),
-            "file_title": p.get("title", ""),
-            "title": title,
-            "creator": _strip_html(meta.get("Artist", {}).get("value", "")) or "Unknown",
-            "license": licence,
-            "source": "Wikimedia Commons",
-            "work_key": work_key,
-            "artwork": is_artwork(title) or is_artwork_category(categories),
-        })
-    if os.getenv("EZSEARCH_ALLOW_ART", "0") != "1":
-        photographs = [c for c in out if not c.get("artwork")]
-        # Only fall back to artwork if the search was otherwise empty; a grid of
-        # paintings beats a grid of nothing.
-        if photographs:
-            out = photographs
-    return out[:n]
+        for c in got:
+            out.append(c)
+            if len(out) >= n:
+                return out
+    return out
 
 
 _token = {"value": None, "expires": 0.0}
@@ -424,35 +495,48 @@ def search_openverse(query: str, n: int) -> list[dict]:
     # Anonymous callers are capped at 20 results per page; authenticated ones
     # can ask for more. Asking for 24 anonymously is a 401, not an empty page.
     page_size = min(n, 500 if token else 20)
+    timeout = int(os.getenv("EZSEARCH_OPENVERSE_TIMEOUT", "8"))
 
     params = {"q": query, "mature": "false", "license_type": "commercial"}
     if os.getenv("EZSEARCH_OPENVERSE_PHOTOS", "1") == "1":
         params["category"] = "photograph"
-    try:
-        r = requests.get(
-            "https://api.openverse.org/v1/images/",
-            params={**params, "page_size": page_size},
-            headers=headers, timeout=6,
-        )
-        r.raise_for_status()
-        results = r.json().get("results", [])
-        if not results and "category" in params:
-            # The photograph filter was too narrow for this query - try again wider.
-            params.pop("category")
+
+    # Openverse has slow stretches; wait a little longer and try twice before
+    # declaring the source down for the minute.
+    results = None
+    last_error: Exception | None = None
+    for attempt in range(2):
+        if "category" not in params and os.getenv("EZSEARCH_OPENVERSE_PHOTOS", "1") == "1":
+            params["category"] = "photograph"       # restored for the retry
+        try:
             r = requests.get(
                 "https://api.openverse.org/v1/images/",
                 params={**params, "page_size": page_size},
-                headers=headers, timeout=6,
+                headers=headers, timeout=timeout,
             )
             r.raise_for_status()
             results = r.json().get("results", [])
-    except Exception:
+            if not results and "category" in params:
+                # The photograph filter was too narrow for this query - try again wider.
+                params.pop("category")
+                r = requests.get(
+                    "https://api.openverse.org/v1/images/",
+                    params={**params, "page_size": page_size},
+                    headers=headers, timeout=timeout,
+                )
+                r.raise_for_status()
+                results = r.json().get("results", [])
+            break
+        except Exception as e:
+            last_error = e
+            time.sleep(1.5)
+    if results is None:
         # Do not make every search pay the timeout: skip Openverse for a while.
         # Short lockout: an anonymous Openverse failure once trapped the app in
         # a ten-minute Commons-only grid, which looked like "the app is broken"
         # to the user sitting in front of it. A minute cools a hiccup down.
         _openverse_cooldown["until"] = time.time() + 60
-        raise
+        raise last_error or RuntimeError("Openverse request failed")
     out = []
     for it in results:
         licence = f'{it.get("license", "").upper()} {it.get("license_version", "")}'.strip()
@@ -565,25 +649,53 @@ def _search_all(query: str, n: int, allow_any_licence: bool) -> list[dict]:
 MIN_POOL = 6
 """A pool below this is not a choice, only a verdict: keep rewriting the query."""
 
+TOPICAL_MIN = 2
+"""A few on-topic hits beat pages of lookalikes: they lead the grid."""
+
 
 def resolve_query(query: str, n: int = N_CANDIDATES,
                   allow_any_licence: bool = False) -> tuple[str, list[dict]]:
-    """Search, rewriting the query until the answers are worth choosing from.
+    """Search, preferring topical precision, then variety.
 
-    "roundabout in chandigarh" returns exactly one Commons file ( MediaWiki
-    ANDs every word ), while the same words minus "in" return plenty. Each
-    variant needs at least MIN_POOL candidates to be accepted as *the* pool;
-    if no phrasing reaches that, the biggest pool we saw wins - a narrow
-    answer still beats none.
+    The first two variants (the query as given, and the same words without
+    filler) are what the user *meant*: they lead the grid. If filename search
+    alone finds little - "roundabout chandigarh" matches one Commons file -
+    Commons' category space is mined as well. Once those topical hits exist,
+    the nearest broader phrasing tops the pool up so "show more" still has
+    pages. Only when nothing topical comes back do the broader prefixes play
+    their old role: the biggest pool wins.
     """
+    variants = query_variants(query)
+    topical, broader = variants[:2], variants[2:]
+
+    pool: list[dict] = []
+    pool_variant = topical[0] if topical else query
+    for v in topical:
+        got = _search_all(v, n, allow_any_licence)
+        if got:
+            pool = _dedupe(pool + got)
+            pool_variant = v
+        if len(pool) >= MIN_POOL:
+            return v, pool[:n]
+    if pool:
+        # Filename search alone misses categories (see commons_category_files).
+        pool = _dedupe(pool + commons_category_files(query, n))
+    if pool and (len(pool) >= TOPICAL_MIN or not broader):
+        for v in broader:       # top the topical head up for variety
+            got = _search_all(v, min(n, 20), allow_any_licence)
+            pool = _dedupe(pool + got)
+            if len(pool) >= MIN_POOL:
+                break
+        return pool_variant, pool[:n]
+
     best: list[dict] = []
     best_variant = query
-    for i, variant in enumerate(query_variants(query)):
-        candidates = _search_all(variant, n if i == 0 else min(n, 20), allow_any_licence)
+    for v in broader:
+        candidates = _search_all(v, min(n, 20), allow_any_licence)
         if len(candidates) > len(best):
-            best, best_variant = candidates, variant
+            best, best_variant = candidates, v
         if len(candidates) >= MIN_POOL:
-            return variant, candidates
+            return v, candidates
     return best_variant, best
 
 
