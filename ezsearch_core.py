@@ -338,6 +338,14 @@ def search_commons(query: str, n: int) -> list[dict]:
             continue
         title = p.get("title", "").removeprefix("File:").rsplit(".", 1)[0]
         categories = [c.get("title", "") for c in p.get("categories", [])]
+        # A category named "<something> by <artist>" names one specific *work*
+        # of art; two uploads of the same painting carry the same category, so
+        # it doubles as an identity key.
+        work_key = ""
+        for cat in categories:
+            if _BY_ARTIST.search(cat):
+                work_key = _norm_key_text(cat)
+                break
         out.append({
             "thumb": thumb,
             # The original can be enormous, so the fallback is the preview
@@ -350,6 +358,7 @@ def search_commons(query: str, n: int) -> list[dict]:
             "creator": _strip_html(meta.get("Artist", {}).get("value", "")) or "Unknown",
             "license": licence,
             "source": "Wikimedia Commons",
+            "work_key": work_key,
             "artwork": is_artwork(title) or is_artwork_category(categories),
         })
     if os.getenv("EZSEARCH_ALLOW_ART", "0") != "1":
@@ -452,6 +461,18 @@ def search_openverse(query: str, n: int) -> list[dict]:
     return out
 
 
+def _norm_key_text(text: str) -> str:
+    """Lower-case alphanumeric identity for a title or a Commons category."""
+    text = text.strip()
+    text = re.sub(r"^category:", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^file:", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\.(jpe?g|png|gif|tiff?|webp|bmp|svg)$", "",
+                  text, flags=re.IGNORECASE)
+    text = re.sub(r"\([^)]*\)", " ", text)
+    text = re.sub(r"[^a-z0-9 ]+", " ", text.lower())
+    return " ".join(text.split())
+
+
 def _norm_title_key(c: dict) -> str:
     """Cheap identity for "the same picture twice".
 
@@ -460,18 +481,12 @@ def _norm_title_key(c: dict) -> str:
     that differ only in the numeric ids). Lowercasing and throwing away the
     parenthesised ids collapses those.
     """
-    text = (c.get("file_title") or c.get("title") or "").strip()
-    text = re.sub(r"^file:", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\.(jpe?g|png|gif|tiff?|webp|bmp|svg)$", "",
-                  text, flags=re.IGNORECASE)
-    text = text.lower()
-    text = re.sub(r"\([^)]*\)", " ", text)
-    text = re.sub(r"[^a-z0-9 ]+", " ", text)
-    return " ".join(text.split())
+    return _norm_key_text(c.get("file_title") or c.get("title") or "")
 
 
 def _dedupe(candidates: list[dict]) -> list[dict]:
-    seen_pages, seen_images, seen_titles, out = set(), set(), {}, []
+    seen_pages, seen_images, seen_titles, seen_works = set(), set(), {}, set()
+    out = []
     for c in candidates:
         page = c.get("page") or ""
         image = c.get("thumb") or ""
@@ -479,8 +494,10 @@ def _dedupe(candidates: list[dict]) -> list[dict]:
         # legitimately have an identical title for a different picture.
         source = c.get("source") or ""
         title_key = _norm_title_key(c)
+        work = c.get("work_key") or ""
         if (page and page in seen_pages) or (image and image in seen_images) or (
-                title_key and title_key in seen_titles.get(source, ())):
+                title_key and title_key in seen_titles.get(source, ())) or (
+                work and work in seen_works):
             continue
         if page:
             seen_pages.add(page)
@@ -488,6 +505,8 @@ def _dedupe(candidates: list[dict]) -> list[dict]:
             seen_images.add(image)
         if title_key:
             seen_titles.setdefault(source, set()).add(title_key)
+        if work:
+            seen_works.add(work)
         out.append(c)
     return out
 

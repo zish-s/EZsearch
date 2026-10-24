@@ -244,6 +244,19 @@ def test_dedupe_collapses_the_same_work_uploaded_twice():
     assert len(core._dedupe([a, b])) == 1
 
 
+def test_dedupe_collapses_uploads_sharing_a_work_category():
+    """Same work category ("... by <artist>") -> same picture, whatever the names."""
+    cat = "Category:Stürmische See mit Leuchtturm by Carl Blechen"
+    a = {"page": "https://commons/1", "thumb": "https://t/1",
+         "title": "Blechen Carl Stormy Sea@Kunsthalle Hamburg", "source": "Wikimedia Commons",
+         "work_key": core._norm_key_text(cat)}
+    b = {"page": "https://commons/2", "thumb": "https://t/2",
+         "title": "Carl Blechen - Stürmische See mit Leuchtturm", "source": "Wikimedia Commons",
+         "work_key": core._norm_key_text(cat)}
+    assert core._norm_key_text(cat) == "st rmische see mit leuchtturm by carl blechen"
+    assert len(core._dedupe([a, b])) == 1
+
+
 def test_identical_previews_are_dropped(monkeypatch):
     """Different pages, different file names, same pixels -> one tile."""
     class FakeRanker:
