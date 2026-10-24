@@ -276,7 +276,7 @@ century oil paintings. Pasting one into a report is usually not what you meant.
 ARTWORK_CATEGORIES = re.compile(
     r"\b(paintings?|drawings?|engravings?|prints?|etchings?|lithographs?|"
     r"watercolou?rs?|illustrations?|sketches|woodcuts?|artworks?|"
-    r"oil on canvas|fresco(?:es)?|murals?|tapestr(?:y|ies))\b",
+    r"marine art|oil on canvas|fresco(?:es)?|murals?|tapestr(?:y|ies))\b",
     re.IGNORECASE,
 )
 """Commons categories are a far better signal than titles.
@@ -284,6 +284,14 @@ ARTWORK_CATEGORIES = re.compile(
 "The Irwin Lighthouse, Storm Raging by John Wilson Carmichael" says nothing in
 its title, but it sits in "19th-century oil marine paintings".
 """
+
+_BY_ARTIST = re.compile(
+    # Commons names a specific *work* as "<title> by <artist>" - and the same
+    # artwork can be uploaded several times under unrelated file names. When a
+    # candidate's categories say "Stürmische See mit Leuchtturm by Carl
+    # Blechen", it is a painting no matter what its file title calls it.
+    r"\bby\s+[A-Z][A-Za-z'’\-]+(?:\s[A-Z][A-Za-z'’\-]+){0,3}\s*$",
+)
 
 
 def is_artwork(title: str) -> bool:
@@ -293,7 +301,9 @@ def is_artwork(title: str) -> bool:
 
 
 def is_artwork_category(categories: list[str]) -> bool:
-    return any(ARTWORK_CATEGORIES.search(c) for c in categories)
+    return any(
+        ARTWORK_CATEGORIES.search(c) or _BY_ARTIST.search(c) for c in categories
+    )
 
 
 def search_commons(query: str, n: int) -> list[dict]:
@@ -442,17 +452,42 @@ def search_openverse(query: str, n: int) -> list[dict]:
     return out
 
 
+def _norm_title_key(c: dict) -> str:
+    """Cheap identity for "the same picture twice".
+
+    The same artwork is uploaded to Commons several times under unrelated file
+    names ("Asleep in the deep (NYPL Hades-464375-1710679)" and three siblings
+    that differ only in the numeric ids). Lowercasing and throwing away the
+    parenthesised ids collapses those.
+    """
+    text = (c.get("file_title") or c.get("title") or "").strip()
+    text = re.sub(r"^file:", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\.(jpe?g|png|gif|tiff?|webp|bmp|svg)$", "",
+                  text, flags=re.IGNORECASE)
+    text = text.lower()
+    text = re.sub(r"\([^)]*\)", " ", text)
+    text = re.sub(r"[^a-z0-9 ]+", " ", text)
+    return " ".join(text.split())
+
+
 def _dedupe(candidates: list[dict]) -> list[dict]:
-    seen_pages, seen_images, out = set(), set(), []
+    seen_pages, seen_images, seen_titles, out = set(), set(), {}, []
     for c in candidates:
         page = c.get("page") or ""
         image = c.get("thumb") or ""
-        if (page and page in seen_pages) or (image and image in seen_images):
+        # The title check only compares inside one source: another source may
+        # legitimately have an identical title for a different picture.
+        source = c.get("source") or ""
+        title_key = _norm_title_key(c)
+        if (page and page in seen_pages) or (image and image in seen_images) or (
+                title_key and title_key in seen_titles.get(source, ())):
             continue
         if page:
             seen_pages.add(page)
         if image:
             seen_images.add(image)
+        if title_key:
+            seen_titles.setdefault(source, set()).add(title_key)
         out.append(c)
     return out
 
@@ -465,10 +500,12 @@ def _search_all(query: str, n: int, allow_any_licence: bool) -> list[dict]:
     interleave them so that one source cannot crowd the other out of the grid.
     """
     def commons():
-        try:
-            return search_commons(query, n)
-        except Exception:
-            return []
+        for attempt in range(2):            # a Commons hiccup must not silently
+            try:                            # drop the bigger source from the grid
+                return search_commons(query, n)
+            except Exception:
+                time.sleep(1.0 + attempt)
+        return []
 
     def openverse():
         try:
@@ -790,6 +827,25 @@ def fetch_preview(c: dict) -> Image.Image:
     return Image.open(io.BytesIO(data)).convert("RGB")
 
 
+def _ahash(img: Image.Image) -> int | None:
+    """A 64-bit average hash of the preview. None when it cannot be computed."""
+    try:
+        grey = list(img.convert("L").resize((8, 8), Image.LANCZOS).getdata())
+    except Exception:
+        return None
+    average = sum(grey) // len(grey)
+    value = 0
+    for pixel in grey:
+        value = (value << 1) | (pixel >= average)
+    return value
+
+
+def _looks_like_same_image(hashes: list[int], h: int | None) -> bool:
+    if h is None:
+        return False
+    return any((h ^ seen).bit_count() <= 2 for seen in hashes)
+
+
 def rank_candidates(ranker, sentence: str, query: str, cands: list[dict],
                     limit: int | None = None) -> list[dict]:
     """Fetch previews and score them, overlapping the network with the CPU.
@@ -819,12 +875,18 @@ def rank_candidates(ranker, sentence: str, query: str, cands: list[dict],
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {pool.submit(fetch_preview, c): c for c in cands}
-        for future in as_completed(futures):
+        seen_hashes: list[int] = []         # the search APIs happily return the
+        for future in as_completed(futures):  # same picture twice under other names
             c = futures[future]
             try:
                 c["img"] = future.result()
             except Exception:
                 continue
+            image_hash = _ahash(c["img"])
+            if _looks_like_same_image(seen_hashes, image_hash):
+                continue                    # a tile that looks identical adds noise
+            if image_hash is not None:
+                seen_hashes.append(image_hash)
             batch.append(c)
             if len(batch) >= EMBED_BATCH:
                 flush()

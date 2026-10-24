@@ -212,8 +212,12 @@ file's **categories**: that painting lives in "19th-century oil marine paintings
 paintings of lighthouses".
 
 Now a candidate is dropped when its categories or its title say it is a painting, drawing,
-engraving or diagram. EZsearch asks Commons for twice as many results to make up for the ones it
-filters out, and falls back to artwork only if the grid would otherwise be empty. `EZSEARCH_ALLOW_ART=1`
+engraving or diagram - or when one of its categories follows Commons' convention for naming a
+single work, "*title* by *artist*". I only learned that one from the live app: the same painting
+kept sliding through under three unrelated file names, and the only thing all three had in common
+was a category called "Stürmische See mit Leuchtturm by Carl Blechen". EZsearch asks Commons for
+twice as many results to make up for the ones it filters out, and falls back to artwork only if
+the grid would otherwise be empty. `EZSEARCH_ALLOW_ART=1`
 turns the filter off.
 
 ---
@@ -258,7 +262,7 @@ First run downloads the CLIP weights (~600 MB, cached afterwards). After that it
 and ranks entirely offline.
 
 ```bash
-python -m pytest        # 54 offline tests
+python -m pytest        # 57 offline tests
 python ezsearch.py --doctor
 python ezsearch.py --search "a sentence"   # headless
 ```

@@ -225,6 +225,49 @@ def test_artwork_categories_are_recognised():
     assert not core.is_artwork_category(["Category:Lighthouses in England"])
 
 
+def test_work_title_categories_are_artwork():
+    """Commons names a work as "<title> by <artist>" - that is a painting."""
+    assert core.is_artwork_category(
+        ["Stürmische See mit Leuchtturm by Carl Blechen"])
+    assert not core.is_artwork_category(["Lighthouses by country"])
+    assert not core.is_artwork_category(["Ships by builder"])
+
+
+def test_dedupe_collapses_the_same_work_uploaded_twice():
+    """One artwork, three Commons uploads, three different file names."""
+    md = core._norm_title_key
+    a = {"page": "https://commons/1", "thumb": "https://t/1", "title": "Asleep in the deep (NYPL Hades-464375-1710679)",
+         "file_title": "File:Asleep in the deep (NYPL Hades-464375-1710679).jpg", "source": "Wikimedia Commons"}
+    b = {"page": "https://commons/2", "thumb": "https://t/2", "title": "Asleep in the deep (NYPL Hades-464373-1710668)",
+         "file_title": "File:Asleep in the deep (NYPL Hades-464373-1710668).jpg", "source": "Wikimedia Commons"}
+    assert md(a) == "asleep in the deep"
+    assert len(core._dedupe([a, b])) == 1
+
+
+def test_identical_previews_are_dropped(monkeypatch):
+    """Different pages, different file names, same pixels -> one tile."""
+    class FakeRanker:
+        ready = True
+
+        def embed_images(self, batch):
+            import numpy as np
+            return [(c, np.zeros(8, "float32")) for c in batch]
+
+        def score(self, sentence, vectors, query):
+            for c, _ in vectors:
+                c["score"] = 1.0
+            return [c for c, _ in vectors]
+
+    import PIL.Image
+    same = PIL.Image.new("RGB", (8, 8), (100, 150, 200))
+    cands = [{"page": f"https://commons/{i}", "thumb": f"https://t/{i}",
+              "title": f"Stormy sea {i}", "source": "Wikimedia Commons",
+              "img": same} for i in range(3)]
+    out = core.rank_candidates(FakeRanker(), "stormy sea", "stormy sea",
+                               cands, limit=3)
+    assert len(out) == 1, "visually identical tiles should collapse to one"
+
+
 def test_search_commons_drops_paintings(monkeypatch):
     payload = {
         "query": {"pages": {
@@ -279,6 +322,7 @@ def test_openverse_anonymous_requests_stay_under_the_page_limit(monkeypatch):
         calls.append(kwargs)
         return _FakeResponse({"results": []})
 
+    monkeypatch.setenv("EZSEARCH_OPENVERSE", "1")   # not influenced by the caller
     monkeypatch.setattr(core, "_openverse_token", lambda: None)
     monkeypatch.setattr(core.requests, "get", fake_get)
     monkeypatch.setattr(core, "_openverse_cooldown", {"until": 0.0})

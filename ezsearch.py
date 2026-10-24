@@ -52,6 +52,23 @@ def press_combo(letter: str) -> None:
         kb.release(letter)
 
 
+def selection_from_word() -> str:
+    """Ask Word for the selection directly.
+
+    Word sometimes ignores a synthesised Ctrl+C (no error, the clipboard just
+    does not change). COM automation gets the answer straight from the source.
+    """
+    if SYSTEM != "Windows":
+        return ""
+    try:
+        import win32com.client
+        word = win32com.client.GetActiveObject("Word.Application")
+        text = word.ActiveWindow.Selection.Text or ""
+        return str(text).replace("\r", " ").replace("\x07", " ").strip()
+    except Exception:
+        return ""
+
+
 def grab_selection() -> str:
     # The hotkey's own Ctrl/Alt may still be held down; release them so we send a clean Ctrl+C.
     for k in (keyboard.Key.ctrl, keyboard.Key.alt, keyboard.Key.shift):
@@ -73,6 +90,10 @@ def grab_selection() -> str:
         if text != sentinel:
             return text.strip()
     pyperclip.copy(previous)            # nothing was selected: put the clipboard back
+    if fallback := selection_from_word():
+        return fallback                 # Word sometimes ignores a synthetic Ctrl+C
+    print("EZsearch: selection capture failed - "
+          "the clipboard never left the sentinel and Word gave no selection.")
     return ""
 
 

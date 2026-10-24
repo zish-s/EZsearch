@@ -256,7 +256,7 @@ the whole point of showing you where each one came from.
 pip install -r requirements.txt
 pip install pytest
 
-python -m pytest                 # 54 offline tests, no network, no models
+python -m pytest                 # 57 offline tests, no network, no models
 python benchmark.py              # latency + "does CLIP actually help" + model comparison
 python ezsearch.py --doctor      # check that everything is in place
 python ezsearch.py --search "a sentence"    # run the pipeline headless
