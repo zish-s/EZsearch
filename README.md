@@ -102,7 +102,7 @@ Everything is an environment variable - no code edits needed.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `EZSEARCH_HOTKEY` | `<ctrl>+<alt>+f` | Global hotkey |
+| `EZSEARCH_HOTKEY` | `<ctrl>+<shift>+x` | Global hotkey (Ctrl+Shift+X - two keys, avoids Word's accelerators such as Ctrl+Alt+F = footnote) |
 | `EZSEARCH_MODEL` | `llama3.2:3b` | Any model you have pulled in Ollama |
 | `EZSEARCH_CANDIDATES` | `24` | How many candidates to fetch before scoring |
 | `EZSEARCH_SHOWN` | `8` | How many tiles the popup shows |

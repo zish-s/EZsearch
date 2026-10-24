@@ -32,7 +32,7 @@ import ezsearch_core as core
 import ezsearch_focus
 from ezsearch_ui import Popup
 
-HOTKEY = os.getenv("EZSEARCH_HOTKEY", "<ctrl>+<alt>+f")
+HOTKEY = os.getenv("EZSEARCH_HOTKEY", "<ctrl>+<shift>+x")
 
 SYSTEM = platform.system()
 
