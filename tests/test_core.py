@@ -66,6 +66,8 @@ def test_resolve_query_falls_back_to_the_biggest_pool(monkeypatch):
         return []
 
     monkeypatch.setattr(core, "_search_all", fake_search_all)
+    # This test is about the fallback, not category mining: keep it off the network.
+    monkeypatch.setattr(core, "commons_category_files", lambda query, n: [])
     variant, cands = core.resolve_query("roundabout in chandigarh")
     assert variant == "roundabout"
     assert len(cands) == 3

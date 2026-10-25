@@ -411,13 +411,17 @@ def commons_category_files(query: str, n: int) -> list[dict]:
         return []
     place = words[-1].lower()
 
-    r = requests.get("https://commons.wikimedia.org/w/api.php", params={
-        "action": "query", "format": "json", "list": "search",
-        "gsrsearch": f"{words[-1]} {_TRAFFIC_OR}", "gsrnamespace": 14,
-        "gsrlimit": 30, "srprop": "",
-    }, headers={"User-Agent": UA}, timeout=15)
-    r.raise_for_status()
-    hits = [h.get("title", "") for h in (r.json().get("query") or {}).get("search", [])]
+    try:
+        r = requests.get("https://commons.wikimedia.org/w/api.php", params={
+            "action": "query", "format": "json", "list": "search",
+            "gsrsearch": f"{words[-1]} {_TRAFFIC_OR}", "gsrnamespace": 14,
+            "gsrlimit": 30, "srprop": "",
+        }, headers={"User-Agent": UA}, timeout=15)
+        r.raise_for_status()
+        hits = [h.get("title", "") for h in (r.json().get("query") or {}).get("search", [])]
+    except Exception:
+        # Category mining is a bonus; a network hiccup must not sink the search.
+        return []
 
     def score(cat: str) -> int:
         text = cat.lower()
